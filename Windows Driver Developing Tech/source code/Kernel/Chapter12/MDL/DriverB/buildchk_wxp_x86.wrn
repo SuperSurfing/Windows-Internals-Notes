@@ -1,0 +1,2 @@
+1>warnings in directory e:\code\learning\windowsdriver\chapter12\mdl\driverb
+1>e:\code\learning\windowsdriver\chapter12\mdl\driverb\driver.cpp(336) : warning C4996: 'ExAllocatePool': was declared deprecated

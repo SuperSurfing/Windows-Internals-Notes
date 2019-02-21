@@ -1,0 +1,2 @@
+1>warnings in directory e:\code\learning\windowsdriver\chapter11\irp
+1>e:\code\learning\windowsdriver\chapter11\irp\driver.cpp(151) : warning C4996: 'RtlConvertLongToLargeInteger': was declared deprecated

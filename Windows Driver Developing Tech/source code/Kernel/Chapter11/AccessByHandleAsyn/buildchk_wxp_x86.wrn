@@ -1,0 +1,2 @@
+1>warnings in directory e:\code\learning\windowsdriver\chapter11\accessbyhandleasyn
+1>e:\code\learning\windowsdriver\chapter11\accessbyhandleasyn\driver.cpp(154) : warning C4996: 'RtlConvertLongToLargeInteger': was declared deprecated
