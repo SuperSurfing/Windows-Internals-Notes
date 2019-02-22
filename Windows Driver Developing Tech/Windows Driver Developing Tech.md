@@ -181,10 +181,10 @@ HKLM\SYSTEM\CurrentControlSet\services\HelloDDK
 
 #### LoadNTDriver
 
-LoadNTDriver 程序演示了如何调用 SCM 加载/卸载 NT 驱动程序，该程序源码(main.cpp)可疑放到一个 VS2017 的 win32 console 应用程序中 build，仅需修改以下几处：
+LoadNTDriver 程序演示了如何调用 SCM 加载/卸载 NT 驱动程序，该程序源码(main.cpp)可以放到一个 VS2017 的 win32 console 应用程序中 build，仅需修改以下几处：
 
 1. Unicode 改为 “多字节字符集”
-2. LoadNTDriver 和 UnloadNTDriver 形成增加 const 修饰
+2. LoadNTDriver 和 UnloadNTDriver 形参增加 const 修饰
 3. getch -> _getch
 4. 可以将**运行时**改为 MT
 5. 
@@ -1160,8 +1160,45 @@ PIRP IoAllocateIrp(
 	IoFreeIrp(pNewIrp);
 ```
 
-上述代码在实验中，发现会导致 BSOD，注释 IoFreeIrp 这一句后才解决这个问题。在学习完“分层驱动”之后，我们知道，一当调用了 IoCallDriver 后，IRP 的控制权就转交给了被调驱动程序，此后，只有在完成例程中才能拿回控制权。否则，在调用 IoCallDriver 后再设置 IRP，则会引起奔溃。参考 12.1 完成例程。
+上述代码在实验中，发现会导致 BSOD，注释 IoFreeIrp 这一句后才解决这个问题。在学习完“分层驱动”之后，我们知道，一当调用了 IoCallDriver 后，IRP 的控制权就转交给了被调驱动程序，此后，只有在完成例程中才能拿回控制权。否则，在调用 IoCallDriver 后再设置 IRP，则会引起奔溃。参考 12.1 完成例程。  
 
+通过 windbg.exe 调试 BSOD 的 memory.dump 文件（ETW 中可以看到该次 BSOD 的信息和 dump 文件路径）：
+
+```
+1: kd> !analyze -v
+*******************************************************************************
+*                                                                             *
+*                        Bugcheck Analysis                                    *
+*                                                                             *
+*******************************************************************************
+
+MULTIPLE_IRP_COMPLETE_REQUESTS (44)
+A driver has requested that an IRP be completed (IoCompleteRequest()), but
+the packet has already been completed.  This is a tough bug to find because
+the easiest case, a driver actually attempted to complete its own packet
+twice, is generally not what happened.  Rather, two separate drivers each
+believe that they own the packet, and each attempts to complete it.  The
+first actually works, and the second fails.  Tracking down which drivers
+in the system actually did this is difficult, generally because the trails
+of the first driver have been covered by the second.  However, the driver
+stack for the current request can be found by examining the DeviceObject
+fields in each of the stack locations.
+
+...
+STACK_TEXT:  
+96313ad8 83c9e6e1 00000044 88eb3a48 00001dae nt!KeBugCheckEx+0x1e
+96313b00 979d593a 88eb3a48 96040000 00000001 nt!IopFreeIrp+0x22
+96313b44 83c46f72 889ae7b0 889e8278 889e8278 HelloDDKB!HelloDDKRead+0x1aa [e:\code\learning\windowsdriver\chapter11\allocateirp\driver.cpp @ 185] 
+96313b5c 83e44eec 889e8278 889e82e8 888c7f80 nt!IofCallDriver+0x63
+96313b7c 83e7e3f3 889ae7b0 888c7f80 00000001 nt!IopSynchronousServiceTail+0x1f8
+96313c08 83c4da8e 889ae7b0 889e8278 00000000 nt!NtReadFile+0x664
+96313c08 77466c04 889ae7b0 889e8278 00000000 nt!KiSystemServicePostCall
+WARNING: Frame IP not in any known module. Following frames may be wrong.
+001cf7d0 00000000 00000000 00000000 00000000 0x77466c04
+
+```
+
+从上面的 STACK_TEXT 可以清楚第定位，driver.cpp 185 行的 IoFreeIrp 函数奔溃了。
 
 
 
@@ -1807,4 +1844,5 @@ extern "C"
 ### 高级调试技巧
 
 本章将介绍一些windows开发驱动的高级调试技巧。主要是使用 WinDbg.exe 进行 dump 文件调试和双机内核调试。这方面的资料网上比较多，建议遇到问题直接 google 。
+
 
