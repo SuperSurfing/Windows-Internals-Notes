@@ -15,6 +15,9 @@
   - [ServiceMain](#servicemain)
   - [Service Control Handler](#service_control_handler)
 - [Simple Windows Service in C++](#simple_service)
+  - [sample介绍](#sample介绍)
+  - [加载和卸载](#加载和卸载)
+  - [windbg调试](#windbg调试)
 - [Service程序的设计逻辑](#service程序的设计逻辑)
 
 
@@ -92,9 +95,9 @@ SCM 通过读下面的注册表项来初始化它的“internal database”
 5. main 函数执行完 StartServiceCtrlDispatcher （向 SCM 注册 ServiceMain 函数指针）后退出。  
 6. StartService 向 service controller 发起请求，service controller 在前面创建的进程地址空间中创建新线程，调用 ServiceMain  
 7. ServiceMain 再创建线程，执行 service tasks 。  
-8. ServiceMain 不直接执行  service tasks ，而是复杂与 controller 交互，控制 service 的 start/stop 。  
+8. ServiceMain 不直接执行  service tasks ，它会等待线程函数的结束。  
 9. ServiceMain 会向 SCM 注册 Service Control Handler 回调函数，当需要停止时，SCM 会调用这个回调函数。  
-10. Service Control Handler 会设置 STOP 事件，ServiceMain 收到事件后即可继续执行。  
+10. Service Control Handler 会设置 STOP 事件，线程函数收到后，结束线程循环。  
 
 #### Service_Entry_Point
 
@@ -107,7 +110,7 @@ SCM 通过读下面的注册表项来初始化它的“internal database”
 Services 程序的执行流在 SCM 与 main() 函数之间有一个切换的动作，具体流程是：  
 1. SCM 启动 service 程序，进入 main() 函数
 2. main() 执行一些初始化操作
-3. main() 调用 StartServiceCtrlDispatcher() 函数，将控制权又转交给 SCM 。
+3. main() 调用 StartServiceCtrlDispatcher() 函数，将控制权又转交给 SCM ，然后就退出了。
 
 > When the SCM starts a service program, it waits for it to call the StartServiceCtrlDispatcher function. 
 
@@ -116,6 +119,13 @@ Services 程序的执行流在 SCM 与 main() 函数之间有一个切换的动作，具体流程是：
  StartServiceCtrlDispatcher() 函数能够告诉 SCM 关于该 service 的一些信息：  
 
 > The StartServiceCtrlDispatcher function takes a **SERVICE_TABLE_ENTRY** structure for each service contained in the process. Each structure specifies the service name and the entry point for the service.
+
+调用 StartServiceCtrlDispatcher 失败后，GetLastError() = 0x00000427  
+> 服务进程无法连接到服务控制器上。   
+
+从这里可以看出，**main 函数并不是注册 service 本身（CreateService 函数负责注册 service 本身），而只是注册 ServiceMain 函数**。
+
+
 
 ##### SERVICE_TABLE_ENTRY
 
@@ -199,12 +209,52 @@ Service Control Handler 是一个回调函数，其中会维护一个 switch - cases，执行 Cont
 
 ### Simple_Service
 
+#### sample介绍
+
 [Simple Windows Service in C++](https://www.codeproject.com/Articles/499465/Simple-Windows-Service-in-Cplusplus) 是一个非常小巧但是功能集备的 Windows Service 程序。  
 
 对照上面的知识点讲解，可以很轻松地掌握 Windows Service 程序的架构。  
 
 除此之外，[MSDN - CPP Windows Service](https://code.msdn.microsoft.com/windowsapps/CppWindowsService-cacf4948) 示例程序演示了 service 程序的加载、启动、停止和卸载，也可以参考。  
 
+CPP Windows Service 示例程序中 wmain() 函数包含了三个执行流分支：install, remove, run ，分别对应不同的命令行参数。其中 run 分支对应的就是普通 service program 的 main 函数逻辑。 
+
+
+#### 加载和卸载
+
+Simple Windows Service in C++ 的作者给出的是命令行的加载方式。
+
+关于 service 的加载，还可以参考 [install a service](https://stackoverflow.com/questions/8164859/install-a-windows-service-using-a-windows-command-prompt)  
+
+[MSDN - install and uninstall service](https://docs.microsoft.com/en-us/dotnet/framework/windows-services/how-to-install-and-uninstall-services) 给出的是 VS 自带的加载工具。  
+
+
+#### windbg调试
+
+设置好符号路径，通过 windbg.exe 打开 SampleService.exe   
+
+```
+bp SampleService!wMain
+g
+g
+k
+```
+可以查看它的 main 函数的调用堆栈
+
+```
+0:000:x86> k
+ # ChildEBP RetAddr  
+00 00cff7f4 009122ae SampleService!wmain [e:\code\learning\sampleservice\sampleservicemain.cpp @ 15] 
+01 00cff808 00912117 SampleService!invoke_main+0x1e [d:\agent\_work\3\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl @ 90] 
+02 00cff864 00911fad SampleService!__scrt_common_main_seh+0x157 [d:\agent\_work\3\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl @ 288] 
+03 00cff86c 00912328 SampleService!__scrt_common_main+0xd [d:\agent\_work\3\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl @ 331] 
+04 00cff874 762a0179 SampleService!wmainCRTStartup+0x8 [d:\agent\_work\3\s\src\vctools\crt\vcstartup\src\startup\exe_wmain.cpp @ 17] 
+05 00cff884 77ac662d KERNEL32!BaseThreadInitThunk+0x19
+06 00cff8e0 77ac65fd ntdll_77a60000!__RtlUserThreadStart+0x2f
+07 00cff8f0 00000000 ntdll_77a60000!_RtlUserThreadStart+0x1b
+```
+
+从上面的堆栈信息可以明显发现，wmain 是程序的入口函数，它由 wmainCRTStartup 调用，在主线程执行。  
 
 
 ### Service程序的设计逻辑
