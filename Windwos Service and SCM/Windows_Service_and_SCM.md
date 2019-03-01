@@ -7,6 +7,7 @@
 
 - [基础知识](#基础知识)
   - [What is Windows Service](#what_is_windows_service)
+  - [Service的登陆账户](#service的登录账户)
   - [SCM](#scm)
   - [Service Programs](#service_programs)
   - [Event Trace for Windows](#etw)
@@ -19,6 +20,8 @@
   - [加载和卸载](#加载和卸载)
   - [windbg调试](#windbg调试)
 - [Service程序的设计逻辑](#service程序的设计逻辑)
+  - [auto_restart](#auto_restart)
+  - [Watch Dog](#watchdog)
 
 
 ### 基础知识
@@ -39,6 +42,24 @@
 - Service control program
 
 
+#### Service的登陆账户
+
+Windows Services 运行在三类用户账户中，观察 SCM 首页最后一列“Log On As”可知：  
+
+
+Log On As | Description
+---|---
+Local System | 系统级的服务，比如 w3p.exe
+Local Service| 普通本地服务
+Network Service| 网络服务，比如 MSMQ
+
+这三类账户的权限逐渐降低：Local System 账户不需要密码（本地系统账户），默认启动，所有登陆用户都可见；Local Service 账户需要用当前登陆用户的账号和密码；Network Service 也需要当前登陆用户的账号和密码。  
+
+
+![](https://github.com/SuperSurfing/Windows-Internals-Notes/blob/master/Windwos%20Service%20and%20SCM/Images/service_lonin.png?raw=true)
+
+
+
 #### SCM
 
 SCM - [Service Control Manager](https://en.wikipedia.org/wiki/Service_Control_Manager)，是一个特殊的系统进程，负责管理 Windows Services 。  
@@ -51,7 +72,11 @@ SCM 通过读下面的注册表项来初始化它的“internal database”
 
 换句话说，HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services 中包含了 Windows Services 的各种信息。
 
-[《Windows驱动开发技术详解》](https://blog.csdn.net/Sagittarius_Warrior/article/details/87193389) CH3 中的 LoadNTDriver.exe 示例程序演示了如何通过 SCM 加载和卸载一个 Windows Service 。它的核心函数是 [CreateService()](https://docs.microsoft.com/en-us/windows/desktop/services/installing-a-service) 。  
+[《Windows驱动开发技术详解》](https://blog.csdn.net/Sagittarius_Warrior/article/details/87193389) CH3 中的 LoadNTDriver.exe 示例程序演示了如何通过 SCM 加载和卸载一个 Windows Service 。它的核心函数是 [CreateService()](https://docs.microsoft.com/en-us/windows/desktop/services/installing-a-service) 。 
+
+下图是 SCM 显示的 service 属性：
+
+![](https://github.com/SuperSurfing/Windows-Internals-Notes/blob/master/Windwos%20Service%20and%20SCM/Images/service_common.png?raw=true)
 
 
 ##### services.msc
@@ -259,10 +284,30 @@ k
 
 ### Service程序的设计逻辑
 
+#### auto_restart
 
-对于 Windows service 程序来说，它除了可以设置开机自动启动外，它还有一项非常有用的特点——自动重启（Auto restart）。当 Windows service 程序意外奔溃之后，系统会自动重启该 service，可以设置重启的次数。参考：[Auto restart a windows service if it crashes](https://stackoverflow.com/questions/36309449/how-to-restart-a-windows-service-using-task-scheduler)  
+对于 Windows service 程序来说，它除了可以设置开机自动启动外，它还有一项非常有用的特点——自动重启（Auto restart）。当 Windows service 程序意外奔溃之后，系统会自动重启该 service，可以设置重启的次数。参考：[Auto restart a windows service if it crashes](https://stackoverflow.com/questions/36309449/how-to-restart-a-windows-service-using-task-scheduler)    
 
-ServiceMain 函数用于与 SCM 交互，一般不在其所在的线程执行 tasks，以防阻塞 service 。因此，明智的设计是在 ServiceMain 中创建新的线程执行 service tasks 任务。  
+下图是 SCM - service 属性中设置重启的页面：
 
-Service 进程作为一种常驻内存的后台进程，一般都将它当作 watch dog 。在程序设计的时候，可以让 Service 进程在创建其他进程去执行任务，这种设计可以保持Service 进程地址空间的独立性，进而减少 service 程序的崩溃次数。  
+![](https://github.com/SuperSurfing/Windows-Internals-Notes/blob/master/Windwos%20Service%20and%20SCM/Images/servicerestore.png?raw=true)   
+
+这些设置都可以在注册表中找到
+
+> HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\CppWindowsService
+
+
+#### WatchDog
+
+ServiceMain 函数用于与 SCM 交互，一般不在其所在的线程执行 tasks，以防阻塞 service 。因此，明智的设计是在 ServiceMain 中创建新的线程执行 service tasks 任务。 
+
+除了多线程的设计模式，还有一种更复杂的多进程设计模式：    
+1. 将 Service 进程作为一个 watch dog 进程。  
+2. 在 ServiceMain 函数中，根据不同的任务，创建不同的进程，比如：工作进程、更新进程等。  
+3. 在 ServiceMain 函数中创建一个 watch dog 线程，监视它的子进程。  
+4. 在子进程中创建“命名事件对象”，提供给 watch dog 监测。
+
+一般不直接将子进程的“进程对象”作为监视目标，因为一当子进程崩溃并重启后，它的进程对象也改变了（PID 不同）。
+
+
 
